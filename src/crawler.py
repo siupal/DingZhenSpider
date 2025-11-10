@@ -202,6 +202,62 @@ class BiliCrawler:
             time.sleep(self.sleep_between)
         return results
 
+    # ---- Utilities for time filtering and comments ----
+    @staticmethod
+    def filter_by_pubdate(items: List[Dict[str, Any]], start_ts: int, end_ts: int) -> List[Dict[str, Any]]:
+        out = []
+        for it in items:
+            ts = int(it.get("pubdate") or 0)
+            if start_ts <= ts < end_ts:
+                out.append(it)
+        return out
+
+    def get_aid_by_bvid(self, bvid: str) -> Optional[int]:
+        url = "https://api.bilibili.com/x/web-interface/view"
+        data = self.http.get_json(url, params={"bvid": bvid})
+        aid = (((data or {}).get("data") or {}).get("aid"))
+        try:
+            return int(aid)
+        except Exception:
+            return None
+
+    def _shape_comment(self, c: Dict[str, Any]) -> Dict[str, Any]:
+        member = c.get("member", {})
+        content = c.get("content", {})
+        return {
+            "rpid": c.get("rpid"),
+            "parent": c.get("parent"),
+            "floor": c.get("floor"),
+            "like": c.get("like"),
+            "ctime": c.get("ctime"),
+            "uname": member.get("uname"),
+            "mid": member.get("mid"),
+            "message": content.get("message"),
+        }
+
+    def fetch_comments_hot_by_bvid(self, bvid: str, top_n: int = 10) -> Dict[str, Any]:
+        """Fetch top hot comments for a video via web comment API without WBI.
+        Endpoint: x/v2/reply with sort=2 (hot). Build root comments and their child replies.
+        """
+        aid = self.get_aid_by_bvid(bvid)
+        if not aid:
+            return {"bvid": bvid, "aid": None, "replies": []}
+        url = "https://api.bilibili.com/x/v2/reply"
+        params = {"type": 1, "oid": aid, "sort": 2, "ps": max(10, top_n), "pn": 1}
+        data = self.http.get_json(url, params=params)
+        root = (data or {}).get("data") or {}
+        replies = root.get("replies") or []
+        out: List[Dict[str, Any]] = []
+        for c in replies[:top_n]:
+            shaped = self._shape_comment(c)
+            # include first few children to show floor relation
+            children = []
+            for cc in (c.get("replies") or [])[:10]:
+                children.append(self._shape_comment(cc))
+            shaped["replies"] = children
+            out.append(shaped)
+        return {"bvid": bvid, "aid": aid, "replies": out}
+
     def fetch_ranking(self, rid: int = 0, day: int = 3, type_: str = "all") -> List[Dict[str, Any]]:
         # ranking v2 接口（不同分区/时段），不分页
         url = "https://api.bilibili.com/x/web-interface/ranking/v2"

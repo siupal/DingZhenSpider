@@ -5,6 +5,7 @@ import sqlite3
 from typing import List, Dict, Any
 
 import pandas as pd
+import json
 
 
 COLUMNS = [
@@ -92,3 +93,10 @@ def persist_all(items: List[Dict[str, Any]], output_dir: str, basename: str = "v
         save_csv(items, csv_path)
         save_sqlite(items, db_path)
     return {"csv": csv_path, "sqlite": db_path}
+
+
+def save_json(data: Any, path: str) -> str:
+    ensure_dir(os.path.dirname(path) or ".")
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    return path
