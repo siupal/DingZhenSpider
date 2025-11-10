@@ -13,3 +13,4 @@ http:
   proxy: ""   # 如需：http://127.0.0.1:7890
 headers:
   User-Agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+  Cookie: "buvid3=6A4FF78E-6F64-34EB-0462-C647FC26381126684infoc; b_nut=1762774226; b_lsid=B21095910A_19A6D8816DC; _uuid=FE3FBDB5-3C2C-F10C7-BDD4-E210FBD9E827226657infoc; buvid_fp=57dcbd7de0bee67e9d7e1870571ec803; home_feed_column=5; bili_ticket=eyJhbGciOiJIUzI1NiIsImtpZCI6InMwMyIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3NjMwMzM0MjcsImlhdCI6MTc2Mjc3NDE2NywicGx0IjotMX0.GBYUYDqLL3rC6iszZMUiDNOEkWAe8i_-9pWwGdaDvD0; bili_ticket_expires=1763033367; buvid4=E78EBE61-D33F-BA56-F25B-FADC48453E6D27293-025111019-sB/k2ruQrJ0dTl4OAnPlWw%3D%3D; browser_resolution=1494-1018"

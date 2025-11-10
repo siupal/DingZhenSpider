@@ -2,6 +2,7 @@ from __future__ import annotations
 import argparse
 import logging
 import os
+import re
 
 from src.config import load_config, merge_config
 from src.crawler import HttpClient, BiliCrawler
@@ -16,7 +17,7 @@ def build_logger() -> logging.Logger:
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Bilibili 视频采集与统计（popular / ranking）")
-    p.add_argument("mode", choices=["popular", "ranking"], help="采集模式")
+    p.add_argument("mode", choices=["popular", "ranking", "search"], help="采集模式")
     p.add_argument("--config", default="config.yaml")
 
     # popular
@@ -27,6 +28,11 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--rid", type=int, help="ranking 分区 0=全站")
     p.add_argument("--day", type=int, choices=[1, 3, 7], help="ranking 天数（部分接口支持）")
     p.add_argument("--rtype", dest="rtype", default="all", help="ranking 类型，默认 all")
+
+    # search
+    p.add_argument("--keyword", help="搜索关键词")
+    p.add_argument("--order", default="click", help="排序方式：click(播放量)/pubdate/totalrank 等，默认 click")
+    p.add_argument("--page_size", type=int, help="搜索每页条数（默认 50）")
 
     # http
     p.add_argument("--timeout", type=int)
@@ -48,6 +54,7 @@ def main():
         "mode": args.mode,
         "popular": {"pages": args.pages, "ps": args.ps},
         "ranking": {"rid": args.rid, "day": args.day, "type": getattr(args, "rtype", None)},
+        "search": {"keyword": getattr(args, "keyword", None), "pages": args.pages, "page_size": args.page_size, "order": getattr(args, "order", None)},
         "http": {
             "timeout": args.timeout,
             "retry": args.retry,
@@ -89,6 +96,18 @@ def main():
         logger.info(f"Start fetching ranking: rid={rid}, day={day}, type={rtype}")
         items = crawler.fetch_ranking(rid=rid, day=day, type_=rtype)
         basename = f"ranking_rid{rid}"
+    elif mode == "search":
+        s = cfg.get("search", {})
+        kw = s.get("keyword") or ""
+        if not kw:
+            raise SystemExit("--keyword 不能为空")
+        pages = int(s.get("pages", 4))
+        page_size = int(s.get("page_size", 50))
+        order = s.get("order", "click")
+        logger.info(f"Start searching: keyword='{kw}', pages={pages}, page_size={page_size}, order={order}")
+        items = crawler.fetch_search_videos(keyword=kw, pages=pages, page_size=page_size, order=order)
+        safe_kw = re.sub(r"[^0-9a-zA-Z\u4e00-\u9fa5_]+", "_", kw)
+        basename = f"search_{safe_kw}"
     else:
         raise SystemExit("Unknown mode")
 
