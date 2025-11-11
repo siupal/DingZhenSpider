@@ -89,9 +89,10 @@ def persist_all(items: List[Dict[str, Any]], output_dir: str, basename: str = "v
     csv_path = os.path.join(output_dir, f"{basename}.csv")
     db_path = os.path.join(output_dir, f"{basename}.sqlite")
     init_sqlite(db_path)
-    if items:
-        save_csv(items, csv_path)
-        save_sqlite(items, db_path)
+    # Always create/update CSV and SQLite, even when items is empty
+    # so that monthly tasks always produce expected artifacts.
+    save_csv(items, csv_path)
+    save_sqlite(items, db_path)
     return {"csv": csv_path, "sqlite": db_path}
 
 

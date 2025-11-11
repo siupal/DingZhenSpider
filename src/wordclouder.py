@@ -14,6 +14,13 @@ try:
 except Exception:  # pragma: no cover
     cv2 = None
 
+# Optional embedding model for vector-based sentiment
+try:  # pragma: no cover
+    from sentence_transformers import SentenceTransformer
+    import numpy as _np
+except Exception:  # pragma: no cover
+    SentenceTransformer = None  # type: ignore
+
 
 DEFAULT_STOPWORDS = set(
     [
@@ -153,6 +160,16 @@ def generate_wordcloud_with_ref(
     opacity: float = 1.0,
     word_color: str | None = None,
     save_mask_path: str | None = None,
+    sentiment_lexicon: str | None = None,
+    sentiment_pos_color: str = "#2ecc71",
+    sentiment_neg_color: str = "#e74c3c",
+    sentiment_neu_color: str = "#95a5a6",
+    sentiment_pos_threshold: float = 0.1,
+    sentiment_neg_threshold: float = -0.1,
+    sentiment_auto: bool = False,
+    sbert_model: str = "paraphrase-multilingual-MiniLM-L12-v2",
+    sentiment_pos_seeds: list[str] | None = None,
+    sentiment_neg_seeds: list[str] | None = None,
 ) -> str:
     mask = None
     if mask_path:
@@ -221,6 +238,116 @@ def generate_wordcloud_with_ref(
         )
         wc.generate(text)
         wc = wc.recolor(color_func=solid_color_func)
+        wc.to_file(output_path)
+    elif sentiment_lexicon:
+        # sentiment-based recolor: word -> score -> color
+        lex: dict[str, float] = {}
+        try:
+            # try csv with header or no header
+            try:
+                df_lex = pd.read_csv(sentiment_lexicon)
+                if df_lex.shape[1] >= 2:
+                    wcol = df_lex.columns[0]
+                    scol = df_lex.columns[1]
+                    for _, r in df_lex.iterrows():
+                        try:
+                            lex[str(r[wcol])] = float(r[scol])
+                        except Exception:
+                            continue
+                else:
+                    # single column not supported
+                    pass
+            except Exception:
+                # fallback: txt "word,score" per line
+                with open(sentiment_lexicon, "r", encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line or line.startswith("#"):
+                            continue
+                        sep = "," if "," in line else None
+                        parts = line.split(sep) if sep else line.split()
+                        if len(parts) >= 2:
+                            w, s = parts[0], parts[1]
+                            try:
+                                lex[w] = float(s)
+                            except Exception:
+                                pass
+        except Exception:
+            lex = {}
+
+        def senti_color_func(word=None, **kwargs):
+            s = lex.get(word, 0.0)
+            if s >= sentiment_pos_threshold:
+                return sentiment_pos_color
+            if s <= sentiment_neg_threshold:
+                return sentiment_neg_color
+            return sentiment_neu_color
+
+        effective_contour_width2 = 0 if (transparent or composite_on) else contour_width
+        wc = WordCloud(
+            font_path=font_path,
+            background_color=(None if (transparent or composite_on) else background_color),
+            mode=("RGBA" if (transparent or composite_on) else "RGB"),
+            max_words=max_words,
+            width=width,
+            height=height,
+            mask=mask,
+            contour_width=effective_contour_width2,
+            contour_color=contour_color,
+        )
+        wc.generate(text)
+        wc = wc.recolor(color_func=senti_color_func)
+        wc.to_file(output_path)
+    elif sentiment_auto:
+        # Auto infer sentiment via embeddings if SentenceTransformer is available
+        if SentenceTransformer is None:
+            raise RuntimeError("sentence-transformers is not installed. Please install it or disable --sentiment_auto.")
+
+        pos_seeds = sentiment_pos_seeds or ["好", "喜欢", "赞", "优秀", "开心", "快乐", "正面"]
+        neg_seeds = sentiment_neg_seeds or ["差", "讨厌", "踩", "糟糕", "伤心", "愤怒", "负面"]
+
+        model = SentenceTransformer(sbert_model)
+        # Build vocabulary from current tokenized text (space-separated tokens)
+        vocab = sorted(set([w for w in text.split() if len(w) > 1]))
+        if not vocab:
+            vocab = []
+
+        emb_pos = model.encode(pos_seeds, normalize_embeddings=True)
+        emb_neg = model.encode(neg_seeds, normalize_embeddings=True)
+        cen_pos = emb_pos.mean(axis=0)
+        cen_neg = emb_neg.mean(axis=0)
+        words_emb = model.encode(vocab, normalize_embeddings=True) if vocab else _np.zeros((0, cen_pos.shape[0]))
+
+        # score = cos(word,pos) - cos(word,neg) since normalized
+        scores = {}
+        for i, w in enumerate(vocab):
+            v = words_emb[i]
+            sp = float((v * cen_pos).sum())
+            sn = float((v * cen_neg).sum())
+            scores[w] = sp - sn
+
+        def senti_color_func(word=None, **kwargs):
+            s = scores.get(word, 0.0)
+            if s >= sentiment_pos_threshold:
+                return sentiment_pos_color
+            if s <= sentiment_neg_threshold:
+                return sentiment_neg_color
+            return sentiment_neu_color
+
+        effective_contour_width2 = 0 if (transparent or composite_on) else contour_width
+        wc = WordCloud(
+            font_path=font_path,
+            background_color=(None if (transparent or composite_on) else background_color),
+            mode=("RGBA" if (transparent or composite_on) else "RGB"),
+            max_words=max_words,
+            width=width,
+            height=height,
+            mask=mask,
+            contour_width=effective_contour_width2,
+            contour_color=contour_color,
+        )
+        wc.generate(text)
+        wc = wc.recolor(color_func=senti_color_func)
         wc.to_file(output_path)
 
     # Composite wordcloud in front of the reference/base image if requested

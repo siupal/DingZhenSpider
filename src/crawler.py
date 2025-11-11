@@ -269,7 +269,7 @@ class BiliCrawler:
         # 旧接口按 day 提供榜单；若需要 day 细分，可在扩展时切换到旧版或其他端点
         return batch
 
-    def fetch_search_videos(self, keyword: str, pages: int = 4, page_size: int = 50, order: str = "click") -> List[Dict[str, Any]]:
+    def fetch_search_videos(self, keyword: str, pages: int = 4, page_size: int = 50, order: str = "click", on_page=None) -> List[Dict[str, Any]]:
         """使用 Web WBI 搜索接口，按播放量(click)排序，抓取若干页视频结果。
         目标总量 pages*page_size，建议设置为 4*50=200。
         """
@@ -323,5 +323,10 @@ class BiliCrawler:
                     batch.append(item)
             results.extend(batch)
             self.logger.info(f"search page {page} got {len(batch)} items")
+            if on_page:
+                try:
+                    on_page(page, len(batch))
+                except Exception:
+                    pass
             time.sleep(self.sleep_between)
         return results
