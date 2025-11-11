@@ -66,6 +66,9 @@ def generate_wordcloud(
     contour_color: str = "black",
     transparent: bool = False,
 ) -> str:
+    # When rendering with transparent background (RGBA), WordCloud's contour drawing expects RGB arrays.
+    # To avoid broadcasting errors, disable contour when transparent is True.
+    effective_contour_width = 0 if transparent else contour_width
     wc = WordCloud(
         font_path=font_path,
         background_color=(None if transparent else background_color),
@@ -74,7 +77,7 @@ def generate_wordcloud(
         width=width,
         height=height,
         mask=mask,
-        contour_width=contour_width,
+        contour_width=effective_contour_width,
         contour_color=contour_color,
     )
     img = wc.generate(text)
@@ -148,6 +151,8 @@ def generate_wordcloud_with_ref(
     transparent: bool = False,
     composite_on: str | None = None,
     opacity: float = 1.0,
+    word_color: str | None = None,
+    save_mask_path: str | None = None,
 ) -> str:
     mask = None
     if mask_path:
@@ -159,6 +164,12 @@ def generate_wordcloud_with_ref(
                 mask = load_mask(mask_path, invert=invert_mask, threshold=threshold)
         else:
             mask = load_mask(mask_path, invert=invert_mask, threshold=threshold)
+    # Apply invert post-process so it also works for grabcut path
+    if mask is not None and invert_mask and segment == "grabcut":
+        mask = 255 - mask
+    # optionally dump mask for debugging
+    if mask is not None and save_mask_path:
+        Image.fromarray(mask).save(save_mask_path)
     path = generate_wordcloud(
         text,
         output_path,
@@ -174,6 +185,8 @@ def generate_wordcloud_with_ref(
     )
     # If color reference is provided, recolor and overwrite
     if color_ref_path:
+        # When transparent/compositing, disable contour to avoid RGBA vs RGB broadcasting issues
+        effective_contour_width2 = 0 if (transparent or composite_on) else contour_width
         wc = WordCloud(
             font_path=font_path,
             background_color=(None if (transparent or composite_on) else background_color),
@@ -182,13 +195,33 @@ def generate_wordcloud_with_ref(
             width=width,
             height=height,
             mask=mask,
-            contour_width=contour_width,
+            contour_width=effective_contour_width2,
             contour_color=contour_color,
         )
         wc.generate(text)
         colors = load_color_func(color_ref_path)
-        img = wc.recolor(color_func=colors)
-        img.to_file(output_path)
+        wc = wc.recolor(color_func=colors)
+        wc.to_file(output_path)
+    elif word_color:
+        # Monochrome recolor for silhouette-style words
+        def solid_color_func(*args, **kwargs):
+            return word_color
+        # regenerate and recolor
+        effective_contour_width2 = 0 if (transparent or composite_on) else contour_width
+        wc = WordCloud(
+            font_path=font_path,
+            background_color=(None if (transparent or composite_on) else background_color),
+            mode=("RGBA" if (transparent or composite_on) else "RGB"),
+            max_words=max_words,
+            width=width,
+            height=height,
+            mask=mask,
+            contour_width=effective_contour_width2,
+            contour_color=contour_color,
+        )
+        wc.generate(text)
+        wc = wc.recolor(color_func=solid_color_func)
+        wc.to_file(output_path)
 
     # Composite wordcloud in front of the reference/base image if requested
     if composite_on:

@@ -37,6 +37,10 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--composite_on", help="Place wordcloud in front of this image (usually same as --ref)")
     p.add_argument("--opacity", type=float, default=1.0, help="Wordcloud opacity when compositing (0~1)")
     p.add_argument("--transparent", action="store_true", help="Render wordcloud with transparent background (useful for compositing)")
+    # Silhouette/monochrome options
+    p.add_argument("--word_color", help="Monochrome word color like #000000; if set, color_ref is disabled")
+    # Separate color reference image
+    p.add_argument("--color_ref", help="Optional color reference image path; if given and word_color not set, colors will be sampled from this image")
     return p.parse_args()
 
 
@@ -61,7 +65,7 @@ def main():
         output_path=out_path,
         font_path=args.font,
         mask_path=args.ref,
-        color_ref_path=args.ref,
+        color_ref_path=(None if args.word_color else (args.color_ref or args.ref)),
         invert_mask=bool(args.invert_mask),
         threshold=int(args.threshold),
         segment=args.segment,
@@ -75,6 +79,7 @@ def main():
         transparent=bool(args.transparent or args.composite_on),
         composite_on=args.composite_on,
         opacity=float(args.opacity),
+        word_color=args.word_color,
     )
     print("Saved:", out_path)
 
