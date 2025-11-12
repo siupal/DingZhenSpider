@@ -243,19 +243,30 @@ class BiliCrawler:
         if not aid:
             return {"bvid": bvid, "aid": None, "replies": []}
         url = "https://api.bilibili.com/x/v2/reply"
-        params = {"type": 1, "oid": aid, "sort": 2, "ps": max(10, top_n), "pn": 1}
-        data = self.http.get_json(url, params=params)
-        root = (data or {}).get("data") or {}
-        replies = root.get("replies") or []
-        out: List[Dict[str, Any]] = []
-        for c in replies[:top_n]:
-            shaped = self._shape_comment(c)
-            # include first few children to show floor relation
-            children = []
-            for cc in (c.get("replies") or [])[:10]:
-                children.append(self._shape_comment(cc))
-            shaped["replies"] = children
-            out.append(shaped)
+        def _fetch_with_sort(sort_val: int) -> List[Dict[str, Any]]:
+            params = {"type": 1, "oid": aid, "sort": sort_val, "ps": max(10, top_n), "pn": 1}
+            data = self.http.get_json(url, params=params)
+            root = (data or {}).get("data") or {}
+            replies = root.get("replies") or []
+            out_local: List[Dict[str, Any]] = []
+            for c in replies[:top_n]:
+                shaped = self._shape_comment(c)
+                # include first few children to show floor relation
+                children = []
+                for cc in (c.get("replies") or [])[:10]:
+                    children.append(self._shape_comment(cc))
+                shaped["replies"] = children
+                out_local.append(shaped)
+            return out_local
+
+        # 先试热门排序（2）；若为空，再回退到按点赞（1）
+        out = _fetch_with_sort(2)
+        if not out:
+            try:
+                out = _fetch_with_sort(1)
+            except Exception:
+                # 保持原容错语义
+                out = []
         return {"bvid": bvid, "aid": aid, "replies": out}
 
     def fetch_ranking(self, rid: int = 0, day: int = 3, type_: str = "all") -> List[Dict[str, Any]]:
