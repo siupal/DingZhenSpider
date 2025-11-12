@@ -123,6 +123,43 @@
     ```
   - 去重键优先级：默认 `rpid,id,reply_id`；若缺失则回退到文本列（content/message/text）+ ID 列（rpid/id/reply_id/bvid/oid/mid/uid）的组合。
 
+#### 2.1 合并输出与 JSON 对齐（默认开启按 CSV bvid 对齐）
+- 目的：最终分析既依赖月度 CSV，也需要对应月份的原始评论 JSON。为确保两个数据源严格一致，合并阶段支持“复制并按 bvid 裁剪 JSON”。
+- 行为（自 vX.Y 起生效）：
+  - 在执行合并脚本时，只要提供 `--copy_json`，脚本会：
+    - 按月份在 `--dir_a` 与 `--dir_b` 中查找同名 JSON（如 `comments_丁真_YYYYMM.json`）。
+    - 若两边同时存在，优先选择“文件更大”的那个作为更完整的来源。
+    - 将其复制到 `--json_out_dir`（默认 `data_merged_json`）。
+    - 然后读取当月 CSV 的 `bvid` 集合并“裁剪该 JSON”，只保留 `video.bvid`（或 `comments.bvid`）属于集合内的条目。
+  - 当同时开启宽松筛选（`--relaxed_filter`）时，JSON 的裁剪依据优先取“筛选后的 CSV”（`--filter_out_dir`），否则回退到“合并后的 CSV”（`--out_dir`）。
+  - 对于合并后当月 CSV 行数为 0 的月份，默认不复制 JSON；如需仍输出并裁剪为空集，请追加 `--copy_json_always`。
+
+- 关键词宽松筛选与“关闭评论豁免”：
+  - 参数：
+    - `--relaxed_filter`：打开后会额外输出筛选后的 CSV 至 `--filter_out_dir`（默认 `data_merged_relaxed`）。
+    - `--filter_keywords_file keywords.txt`：外部关键词库（每行一个关键词，支持 `#` 注释与空行）；若未提供，则可用 `--filter_keywords` 逗号分隔传入。
+    - `--filter_cols`：在哪些列里匹配（默认 `content,message,text,title,desc`）。
+    - `--keep_closed_if_title_match`：豁免逻辑开启后，即使评论文本不命中，只要检测到“评论区关闭”提示，或标题命中关键词，也会保留。
+    - `--closed_phrases`：关闭评论的提示短语（默认已内置常见表述，可按需覆盖）。
+
+- 合并 + 宽松筛选 + JSON 对齐 示例：
+  ```powershell
+  python scripts/merge_dedup.py ^
+    --dir_a data_click ^
+    --dir_b data_totalrank ^
+    --out_dir data_merged ^
+    --keys rpid,id,reply_id ^
+    --relaxed_filter ^
+    --filter_out_dir data_merged_relaxed ^
+    --filter_keywords_file keywords.txt ^
+    --keep_closed_if_title_match ^
+    --copy_json ^
+    --json_out_dir data_merged_json
+  ```
+  - 若希望“当月 CSV 为 0 行也复制/输出空 JSON”，追加：`--copy_json_always`。
+
+> 说明：JSON 对齐是基于 CSV 的 `bvid` 列进行子集过滤，确保“当月 JSON 与最终用于分析的 CSV 同步一致”。当启用 `--relaxed_filter` 时，以筛选后的 CSV 为准；否则以合并后的 CSV 为准。
+
 ### 3) 分析层（analysis/）
 - preprocess.py：从评论 JSON/CSV 提取与清洗，输出规范化 CSV（去重、时间标准化等）。
 - sentiment_baseline.py：轻量情感基线（词典 + emoji 规则），按月度聚合情感分数。
@@ -152,6 +189,29 @@
    ```powershell
    python scripts/run_analysis.py --input_dir data_merged --font "C:\\Windows\\Fonts\\msyh.ttc" --months 2020-11:2025-11
    ```
+
+#### 5.1 全流程依次使用的命令脚本（Windows PowerShell）
+- 说明：以下命令按顺序执行，完成“采集（两种排序）→ 合并去重 + 宽松筛选 → JSON 对齐 → 分析与可视化”的完整流程。
+
+```powershell
+# 1) 采集：点击量排序（click）
+python scripts/run_resilient_collect.py --config config.yaml --keyword "丁真" --from_ym 2020-11 --to_ym 2025-11 --orders click --pages 12 --page_size 50 --top_videos 300 --top_comments 200 --output_dir data_click --proxies proxies.txt --cookies cookies.txt --user_agents uas.txt --max_retries_per_month 5 --initial_sleep 8 --sleep_cap 90 --jitter 0.35 --checkpoint analysis/resilient_checkpoint_click.json --attempt_log analysis/resilient_attempts_click.csv --shuffle_months
+
+# 2) 采集：综合排序（totalrank）
+python scripts/run_resilient_collect.py --config config.yaml --keyword "丁真" --from_ym 2020-11 --to_ym 2025-11 --orders totalrank --pages 12 --page_size 50 --top_videos 300 --top_comments 200 --output_dir data_totalrank --proxies proxies.txt --cookies cookies.txt --user_agents uas.txt --max_retries_per_month 5 --initial_sleep 8 --sleep_cap 90 --jitter 0.35 --checkpoint analysis/resilient_checkpoint_totalrank.json --attempt_log analysis/resilient_attempts_totalrank.csv --shuffle_months
+
+# 3) 合并去重 + 宽松筛选 + JSON 对齐（默认按 CSV 的 bvid 过滤 JSON）
+python scripts/merge_dedup.py --dir_a data_click --dir_b data_totalrank --out_dir data_merged --keys rpid,id,reply_id --relaxed_filter --filter_out_dir data_merged_relaxed --filter_keywords_file keywords.txt --keep_closed_if_title_match --copy_json --json_out_dir data_merged_json
+
+# 可选：空月也输出空 JSON（裁剪为空数组）
+# python scripts/merge_dedup.py ... --copy_json --json_out_dir data_merged_json --copy_json_always
+
+# 4) 分析与可视化（基于已对齐的 JSON）
+python scripts/run_analysis.py --data_dir data_merged_json --analysis_dir analysis
+
+# 可选：指定中文字体路径（若图表或词云中文字体异常）
+# $env:DZ_FONT = "C:\\Windows\\Fonts\\msyh.ttc"; python analysis/visualize.py
+```
 
 ### 6) 风控与恢复要点
 - 风控信号：
