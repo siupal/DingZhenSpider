@@ -54,7 +54,16 @@ class HttpClient:
                 resp = self.session.get(url, params=params, timeout=self.timeout)
                 if resp.status_code == 200:
                     try:
-                        return resp.json()
+                        obj = resp.json()
+                        try:
+                            if isinstance(obj, dict):
+                                code = obj.get("code")
+                                if code not in (0, "0", None):
+                                    lg = logging.getLogger("dzspider")
+                                    lg.warning(f"API nonzero code={code} url={url} params_snippet={(str(params)[:160] if params else '')} msg={(obj.get('message') or obj.get('msg') or '')}")
+                        except Exception:
+                            pass
+                        return obj
                     except Exception as e:
                         last_exc = e
                         time.sleep(self.backoff ** (i + 1) + random.random())
@@ -244,28 +253,45 @@ class BiliCrawler:
             return {"bvid": bvid, "aid": None, "replies": []}
         url = "https://api.bilibili.com/x/v2/reply"
         def _fetch_with_sort(sort_val: int) -> List[Dict[str, Any]]:
-            params = {"type": 1, "oid": aid, "sort": sort_val, "ps": max(10, top_n), "pn": 1}
-            data = self.http.get_json(url, params=params)
-            root = (data or {}).get("data") or {}
-            replies = root.get("replies") or []
+            # B站该接口单页 ps 上限约 20，这里做上限并按页累积到 top_n
+            ps = min(20, max(10, int(top_n)))
             out_local: List[Dict[str, Any]] = []
-            for c in replies[:top_n]:
-                shaped = self._shape_comment(c)
-                # include first few children to show floor relation
-                children = []
-                for cc in (c.get("replies") or [])[:10]:
-                    children.append(self._shape_comment(cc))
-                shaped["replies"] = children
-                out_local.append(shaped)
+            pn = 1
+            while len(out_local) < top_n:
+                params = {"type": 1, "oid": aid, "sort": sort_val, "ps": ps, "pn": pn}
+                data = self.http.get_json(url, params=params)
+                root = (data or {}).get("data") or {}
+                replies = root.get("replies") or []
+                if not replies:
+                    break
+                for c in replies:
+                    shaped = self._shape_comment(c)
+                    children = []
+                    for cc in (c.get("replies") or [])[:10]:
+                        children.append(self._shape_comment(cc))
+                    shaped["replies"] = children
+                    out_local.append(shaped)
+                    if len(out_local) >= top_n:
+                        break
+                pn += 1
+                try:
+                    time.sleep(self.sleep_between * 0.3)
+                except Exception:
+                    pass
             return out_local
 
-        # 先试热门排序（2）；若为空，再回退到按点赞（1）
+        # 先试热门排序（2）；若为空，再回退到按点赞（1）；仍为空则按时间（0）
         out = _fetch_with_sort(2)
         if not out:
             try:
                 out = _fetch_with_sort(1)
             except Exception:
                 # 保持原容错语义
+                out = []
+        if not out:
+            try:
+                out = _fetch_with_sort(0)
+            except Exception:
                 out = []
         return {"bvid": bvid, "aid": aid, "replies": out}
 

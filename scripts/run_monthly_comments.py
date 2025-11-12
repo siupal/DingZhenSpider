@@ -105,8 +105,28 @@ def month_task(
         pbar_vids.update(1)
     pbar_vids.close()
 
+    # 如果已存在旧文件且更“丰富”，避免被较差结果覆盖
+    def _score(payload):
+        try:
+            return sum(len(((it or {}).get("comments") or {}).get("replies") or []) for it in (payload or []))
+        except Exception:
+            return 0
+    if os.path.exists(json_path):
+        try:
+            import json as _json
+            with open(json_path, "r", encoding="utf-8") as _f:
+                old_payload = _json.load(_f)
+            if _score(old_payload) >= _score(comments_payload):
+                return json_path
+        except Exception:
+            pass
     save_json(comments_payload, json_path)
     persist_all(picked, output_dir=output_dir, basename=basename)
+    try:
+        total_replies = sum(len(((it or {}).get("comments") or {}).get("replies") or []) for it in (comments_payload or []))
+        print(f"[Monthly] {year}-{int(month):02d} picked={len(picked)} total_replies={total_replies} -> {json_path}")
+    except Exception:
+        pass
     return json_path
 
 
