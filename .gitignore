@@ -2,3 +2,5 @@
 *.csv
 *.sqlite
 *.json
+analysis\visualizations\wordclouds\*
+analysis/visualizations/wordclouds/*

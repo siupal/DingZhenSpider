@@ -4,6 +4,34 @@ import matplotlib.pyplot as plt
 from wordcloud import WordCloud
 
 
+def _pick_font():
+    fp = os.environ.get("DZ_FONT")
+    if fp and os.path.exists(fp):
+        return fp
+    candidates = [
+        r"C:\\Windows\\Fonts\\msyh.ttc",
+        r"C:\\Windows\\Fonts\\msyh.ttf",
+        r"C:\\Windows\\Fonts\\SimHei.ttf",
+        r"C:\\Windows\\Fonts\\simhei.ttf",
+        r"/System/Library/Fonts/STHeiti Light.ttc",
+        r"/Library/Fonts/Arial Unicode.ttf",
+        r"/usr/share/fonts/truetype/arphic/ukai.ttc",
+    ]
+    for p in candidates:
+        if os.path.exists(p):
+            return p
+    return None
+
+
+_FONT_PATH = _pick_font()
+if _FONT_PATH:
+    try:
+        plt.rcParams["font.sans-serif"] = ["Microsoft YaHei", "SimHei"]
+        plt.rcParams["axes.unicode_minus"] = False
+    except Exception:
+        pass
+
+
 def plot_sentiment(ts_csv: str, output_dir: str) -> str:
     os.makedirs(output_dir, exist_ok=True)
     if not os.path.exists(ts_csv):
@@ -41,7 +69,7 @@ def wordcloud_from_topics(topics_csv: str, output_dir: str) -> str:
         freq = {r["word"]: int(r["freq"]) for _, r in sub.iterrows()}
         if not freq:
             continue
-        wc = WordCloud(font_path=None, width=1200, height=600, background_color="white")
+        wc = WordCloud(font_path=_FONT_PATH if _FONT_PATH else None, width=1200, height=600, background_color="white")
         img = wc.generate_from_frequencies(freq)
         p = os.path.join(wc_dir, f"wc_{window}.png")
         img.to_file(p)
