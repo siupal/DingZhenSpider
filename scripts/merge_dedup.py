@@ -3,6 +3,7 @@ import os
 import glob
 import pandas as pd
 import shutil
+import json
 
 
 def read_csv_safe(path: str) -> pd.DataFrame:
@@ -81,6 +82,38 @@ def choose_and_copy_json(month_csv_name: str, dir_a: str, dir_b: str, json_out_d
         return False, None
 
 
+def filter_json_by_bvids(json_path: str, bvids: set[str]) -> bool:
+    try:
+        if not os.path.exists(json_path):
+            return False
+        with open(json_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        if not isinstance(data, list):
+            return False
+        if not bvids:
+            # If no bvids provided, leave as is
+            return True
+        filtered = []
+        for item in data:
+            try:
+                bv = (
+                    (item.get('video') or {}).get('bvid')
+                    or (item.get('comments') or {}).get('bvid')
+                )
+            except Exception:
+                bv = None
+            if bv in bvids:
+                filtered.append(item)
+        with open(json_path, 'w', encoding='utf-8') as f:
+            json.dump(filtered, f, ensure_ascii=False, indent=2)
+        print(f"json filtered -> {json_path} kept={len(filtered)} of total={len(data)}")
+        return True
+    except Exception as e:
+        print(f"[warn] filter json failed for {json_path}: {e}")
+        return False
+    
+
+
 def parse_args():
     ap = argparse.ArgumentParser(description="Merge and deduplicate monthly CSVs from two folders.")
     ap.add_argument("--dir_a", default="data_click", help="first input dir")
@@ -136,7 +169,10 @@ def main():
             if not use_cols or not kws:
                 if args.copy_json:
                     if args.copy_json_always or len(df) > 0:
-                        choose_and_copy_json(name, args.dir_a, args.dir_b, args.json_out_dir)
+                        ok, dst = choose_and_copy_json(name, args.dir_a, args.dir_b, args.json_out_dir)
+                        if ok and dst:
+                            bvids = set(df['bvid'].astype(str)) if 'bvid' in df.columns else set()
+                            filter_json_by_bvids(dst, bvids)
                 continue
             mask = False
             for c in use_cols:
@@ -166,12 +202,21 @@ def main():
             print(f"filtered -> {out_path} rows={len(dff)} (cols={','.join(use_cols)})")
             if args.copy_json:
                 if args.copy_json_always or len(df) > 0:
-                    choose_and_copy_json(name, args.dir_a, args.dir_b, args.json_out_dir)
+                    ok, dst = choose_and_copy_json(name, args.dir_a, args.dir_b, args.json_out_dir)
+                    if ok and dst:
+                        # Prefer filtered bvids when relaxed_filter is on
+                        bvids = set(dff['bvid'].astype(str)) if 'bvid' in dff.columns else (
+                            set(df['bvid'].astype(str)) if 'bvid' in df.columns else set()
+                        )
+                        filter_json_by_bvids(dst, bvids)
     else:
         for name, df in iterator:
             if args.copy_json:
                 if args.copy_json_always or len(df) > 0:
-                    choose_and_copy_json(name, args.dir_a, args.dir_b, args.json_out_dir)
+                    ok, dst = choose_and_copy_json(name, args.dir_a, args.dir_b, args.json_out_dir)
+                    if ok and dst:
+                        bvids = set(df['bvid'].astype(str)) if 'bvid' in df.columns else set()
+                        filter_json_by_bvids(dst, bvids)
 
 
 if __name__ == "__main__":
