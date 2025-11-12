@@ -25,6 +25,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--keyword", default="丁真")
     p.add_argument("--from_ym", default="2020-01")
     p.add_argument("--to_ym", default="2025-10")
+    p.add_argument("--skip_before_ym", default=None, help="Skip months earlier than this YM (e.g., 2020-11)")
     p.add_argument("--top_videos", type=int, default=10)
     p.add_argument("--top_comments", type=int, default=20)
     p.add_argument("--pages", type=int, default=8)
@@ -180,8 +181,19 @@ def main():
     crawler = BiliCrawler(client)
 
     months = list(ym_iter(args.from_ym, args.to_ym))
+    # parse exemption boundary
+    skip_y = skip_m = None
+    if args.skip_before_ym:
+        try:
+            skip_y, skip_m = map(int, str(args.skip_before_ym).split("-"))
+        except Exception:
+            skip_y = skip_m = None
     with tqdm(total=len(months), desc="Monthly comments", unit="month") as pbar:
         for y, m in months:
+            if skip_y and skip_m and ((y < skip_y) or (y == skip_y and m < skip_m)):
+                print(f"[Skip] {y}-{int(m):02d} (before exemption {skip_y}-{int(skip_m):02d})")
+                pbar.update(1)
+                continue
             # 依次尝试 orders；若生成的 JSON 文件体积 > 4KB 视作有效
             for ord_ in args.orders:
                 pbar.set_postfix({"month": f"{y}-{int(m):02d}", "order": ord_})

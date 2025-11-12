@@ -4,3 +4,6 @@
 *.json
 analysis\visualizations\wordclouds\*
 analysis/visualizations/wordclouds/*
+cookies.txt
+proxies.txt
+uas.txt
