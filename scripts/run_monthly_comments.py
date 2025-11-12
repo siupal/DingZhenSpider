@@ -160,8 +160,29 @@ def main():
                 except Exception:
                     time.sleep(args.sleep_sec)
                     continue
-                if os.path.exists(path) and os.path.getsize(path) > 4000:
-                    break
+                if os.path.exists(path):
+                    ok = False
+                    try:
+                        # 更宽松的体积阈值，兼容“数据确实稀少”的月份
+                        if os.path.getsize(path) >= 512:
+                            ok = True
+                        else:
+                            import json
+                            with open(path, "r", encoding="utf-8") as f:
+                                payload = json.load(f)
+                            # 若存在任意非空评论，或至少有选中的视频项，也视作有效结果
+                            for it in (payload or []):
+                                cm = (it or {}).get("comments") or {}
+                                reps = cm.get("replies") or []
+                                if reps:
+                                    ok = True
+                                    break
+                            if not ok and len(payload or []) > 0:
+                                ok = True
+                    except Exception:
+                        ok = False
+                    if ok:
+                        break
                 time.sleep(args.sleep_sec)
             time.sleep(args.sleep_sec)
             pbar.update(1)
