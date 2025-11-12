@@ -252,6 +252,8 @@ class BiliCrawler:
         if not aid:
             return {"bvid": bvid, "aid": None, "replies": []}
         url = "https://api.bilibili.com/x/v2/reply"
+        error_info: Dict[str, Any] = {}
+
         def _fetch_with_sort(sort_val: int) -> List[Dict[str, Any]]:
             # B站该接口单页 ps 上限约 20，这里做上限并按页累积到 top_n
             ps = min(20, max(10, int(top_n)))
@@ -260,6 +262,20 @@ class BiliCrawler:
             while len(out_local) < top_n:
                 params = {"type": 1, "oid": aid, "sort": sort_val, "ps": ps, "pn": pn}
                 data = self.http.get_json(url, params=params)
+                # 捕获接口返回的错误码/信息（例如：UP主已关闭评论区）
+                try:
+                    if isinstance(data, dict):
+                        code = data.get("code")
+                        if code not in (0, "0", None):
+                            error_info.clear()
+                            error_info.update({
+                                "error_code": code,
+                                "error_msg": data.get("message") or data.get("msg") or "",
+                            })
+                            # 非零 code 基本表示本次排序不可用，直接退出分页循环
+                            break
+                except Exception:
+                    pass
                 root = (data or {}).get("data") or {}
                 replies = root.get("replies") or []
                 if not replies:
@@ -293,7 +309,11 @@ class BiliCrawler:
                 out = _fetch_with_sort(0)
             except Exception:
                 out = []
-        return {"bvid": bvid, "aid": aid, "replies": out}
+        result = {"bvid": bvid, "aid": aid, "replies": out}
+        if not out and error_info:
+            # 将错误信息带回结果，便于上层记录（如：UP主已关闭评论区）
+            result.update(error_info)
+        return result
 
     def fetch_ranking(self, rid: int = 0, day: int = 3, type_: str = "all") -> List[Dict[str, Any]]:
         # ranking v2 接口（不同分区/时段），不分页

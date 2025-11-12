@@ -5,6 +5,7 @@ import re
 import sys
 import time
 from datetime import datetime, timezone, timedelta
+import csv
 from pathlib import Path
 
 # ensure project root on sys.path
@@ -90,6 +91,7 @@ def month_task(
     safe_kw = re.sub(r"[^0-9a-zA-Z\u4e00-\u9fa5_]+", "_", keyword)
     basename = f"comments_{safe_kw}_{year}{int(month):02d}"
     json_path = os.path.join(output_dir, f"{basename}.json")
+    err_csv_path = os.path.join(output_dir, f"{basename}_errors.csv")
 
     # 热评抓取（视频级进度）
     comments_payload = []
@@ -104,6 +106,25 @@ def month_task(
         pbar_vids.set_postfix({"bvid": bvid})
         pbar_vids.update(1)
     pbar_vids.close()
+
+    # 写出本月错误明细（如：UP主已关闭评论区）
+    try:
+        err_rows = []
+        for it in (comments_payload or []):
+            cm = (it or {}).get("comments") or {}
+            if cm and not (cm.get("replies") or []) and (cm.get("error_code") is not None or cm.get("error_msg")):
+                err_rows.append({
+                    "bvid": cm.get("bvid") or (it.get("video") or {}).get("bvid"),
+                    "error_code": cm.get("error_code"),
+                    "error_msg": cm.get("error_msg") or "",
+                })
+        if err_rows:
+            with open(err_csv_path, "w", encoding="utf-8", newline="") as f:
+                w = csv.DictWriter(f, fieldnames=["bvid","error_code","error_msg"])
+                w.writeheader()
+                w.writerows(err_rows)
+    except Exception:
+        pass
 
     # 如果已存在旧文件且更“丰富”，避免被较差结果覆盖
     def _score(payload):
