@@ -2,6 +2,7 @@ import argparse
 import os
 import glob
 import pandas as pd
+import shutil
 
 
 def read_csv_safe(path: str) -> pd.DataFrame:
@@ -50,6 +51,36 @@ def merge_and_dedup(dir_a: str, dir_b: str, out_dir: str, keys: list[str]):
         yield name, df
 
 
+def choose_and_copy_json(month_csv_name: str, dir_a: str, dir_b: str, json_out_dir: str):
+    base = os.path.splitext(month_csv_name)[0] + ".json"
+    pa = os.path.join(dir_a, base)
+    pb = os.path.join(dir_b, base)
+    cand = []
+    if os.path.exists(pa):
+        try:
+            cand.append((pa, os.path.getsize(pa)))
+        except Exception:
+            cand.append((pa, 0))
+    if os.path.exists(pb):
+        try:
+            cand.append((pb, os.path.getsize(pb)))
+        except Exception:
+            cand.append((pb, 0))
+    if not cand:
+        return False, None
+    cand.sort(key=lambda x: x[1], reverse=True)
+    src = cand[0][0]
+    os.makedirs(json_out_dir, exist_ok=True)
+    dst = os.path.join(json_out_dir, base)
+    try:
+        shutil.copy2(src, dst)
+        print(f"json -> {dst} from {src} size={cand[0][1]}")
+        return True, dst
+    except Exception as e:
+        print(f"[warn] copy json failed for {base}: {e}")
+        return False, None
+
+
 def parse_args():
     ap = argparse.ArgumentParser(description="Merge and deduplicate monthly CSVs from two folders.")
     ap.add_argument("--dir_a", default="data_click", help="first input dir")
@@ -65,6 +96,19 @@ def parse_args():
         default="content,message,text,title,desc",
         help="comma separated text columns to search in",
     )
+    ap.add_argument(
+        "--keep_closed_if_title_match",
+        action="store_true",
+        help="keep rows when title matches keywords or closed-comment phrases are detected (applies only when --relaxed_filter)",
+    )
+    ap.add_argument(
+        "--closed_phrases",
+        default="关闭评论,评论区关闭,已关闭评论,禁止评论,UP主关闭了评论,作者关闭了评论",
+        help="comma separated phrases indicating comments are closed",
+    )
+    ap.add_argument("--copy_json", action="store_true", help="copy monthly comments JSONs alongside merged results")
+    ap.add_argument("--json_out_dir", default="data_merged_json", help="output dir for copied monthly JSONs")
+    ap.add_argument("--copy_json_always", action="store_true", help="copy JSON even when merged CSV has zero rows")
     return ap.parse_args()
 
 
@@ -86,22 +130,48 @@ def main():
         else:
             kws = [k.strip() for k in args.filter_keywords.split(",") if k.strip()]
         cols = [c.strip() for c in args.filter_cols.split(",") if c.strip()]
+        closed_phrases = [p.strip() for p in (args.closed_phrases or "").split(",") if p.strip()]
         for name, df in iterator:
             use_cols = [c for c in cols if c in df.columns]
             if not use_cols or not kws:
+                if args.copy_json:
+                    if args.copy_json_always or len(df) > 0:
+                        choose_and_copy_json(name, args.dir_a, args.dir_b, args.json_out_dir)
                 continue
             mask = False
             for c in use_cols:
                 s = df[c].astype(str).str.lower()
                 for kw in kws:
                     mask = mask | s.str.contains(kw.lower(), na=False)
+
+            # 豁免：检测“评论区关闭”相关表述，或标题命中关键词时也保留
+            extra_mask = False
+            if args.keep_closed_if_title_match:
+                # 关闭短语检测：在常见文本列里找提示信息
+                closed_cols = [c for c in ["error_msg", "message", "text", "content", "desc"] if c in df.columns]
+                for c in closed_cols:
+                    s = df[c].astype(str)
+                    for phrase in closed_phrases:
+                        extra_mask = extra_mask | s.str.contains(phrase, na=False)
+                # 标题命中：即使评论文本不匹配，只要标题包含关键词也保留
+                if "title" in df.columns:
+                    ts = df["title"].astype(str).str.lower()
+                    for kw in kws:
+                        extra_mask = extra_mask | ts.str.contains(kw.lower(), na=False)
+
+            mask = mask | extra_mask
             dff = df[mask]
             out_path = os.path.join(args.filter_out_dir, name)
             dff.to_csv(out_path, index=False, encoding="utf-8-sig")
             print(f"filtered -> {out_path} rows={len(dff)} (cols={','.join(use_cols)})")
+            if args.copy_json:
+                if args.copy_json_always or len(df) > 0:
+                    choose_and_copy_json(name, args.dir_a, args.dir_b, args.json_out_dir)
     else:
-        for _ in iterator:
-            pass
+        for name, df in iterator:
+            if args.copy_json:
+                if args.copy_json_always or len(df) > 0:
+                    choose_and_copy_json(name, args.dir_a, args.dir_b, args.json_out_dir)
 
 
 if __name__ == "__main__":

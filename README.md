@@ -101,7 +101,7 @@
     - `--orders`：排序维度（点击量 click、综合 totalrank、发布时间 pubdate）。
     - `--proxies`、`--cookies`、`--user_agents`：从文件轮换资源。
     - `--checkpoint`、`--attempt_log`：断点续跑与尝试日志。
-    - `--initial_sleep`、`--sleep_cap`、`--jitter`：指数退避与抖动，缓解风控。
+    - `--initial_sleep`、`--sleep_cap`（设置90就可以规避了）、`--jitter`：指数退避与抖动，缓解风控。
 
 - 配置与资源文件
   - config.yaml：全局默认配置（headers、限速、输出路径等），命令行可覆盖。
@@ -142,7 +142,7 @@
 ### 5) 典型流水线
 1. 防风控采集（示例：扩大采样 + 点击量排序）
    ```powershell
-   python scripts/run_resilient_collect.py --config config.yaml --keyword "丁真" --from_ym 2020-11 --to_ym 2025-11 --orders click --pages 12 --page_size 50 --top_videos 100 --top_comments 200 --output_dir data_click --proxies proxies.txt --cookies cookies.txt --user_agents uas.txt --max_retries_per_month 5 --initial_sleep 8 --sleep_cap 1500 --jitter 0.35 --checkpoint analysis/resilient_checkpoint_click.json --attempt_log analysis/resilient_attempts_click.csv --shuffle_months
+   python scripts/run_resilient_collect.py --config config.yaml --keyword "丁真" --from_ym 2020-11 --to_ym 2025-11 --orders click --pages 12 --page_size 50 --top_videos 100 --top_comments 200 --output_dir data_click --proxies proxies.txt --cookies cookies.txt --user_agents uas.txt --max_retries_per_month 5 --initial_sleep 8 --sleep_cap 90 --jitter 0.35 --checkpoint analysis/resilient_checkpoint_click.json --attempt_log analysis/resilient_attempts_click.csv --shuffle_months
    ```
 2. 再跑一次综合排序 totalrank（输出到 data_totalrank），随后执行：
    ```powershell
@@ -168,3 +168,70 @@
 - 排序偏置：增加 `totalrank`/`pubdate` 并合并去重；
 - 登录/风控降级：确保 cookies 有效且可轮换，代理与 UA 生效；
 - 字段不够：用 preprocess/analysis 流程扩展导出字段；如需更细的评论元数据，可提 Issue 说明需求.
+
+## 现有结构的主要缺点（待逐步优化）
+
+- 入口认知不一致
+  - main.py 名称上像“总入口”，实际生产采集依赖 `scripts/run_monthly_comments.py` 与 `scripts/run_resilient_collect.py`。
+  - 多入口分散，缺少统一 CLI 聚合子命令。
+
+- 策略与能力未分层
+  - 防风控策略（乱序/轮换/退避/检查点/日志）写在脚本里，难以在其他项目复用。
+  - 语义成功判定、错误记录等业务判断混在编排代码中，替换与测试成本高。
+
+- 脚本与模块边界模糊
+  - `scripts/merge_dedup.py` 既做 CLI 又提供可复用函数，按职责应“模块函数 + 脚本薄封装”。
+  - `analysis/*.py` 同时支持 import 与 `__main__` 执行，角色略混合。
+
+- 资源未集中管理
+  - cookies/proxies/uas/keywords 分散在根目录，缺少 `resources/` 统一归档与命名约定。
+
+- 产物与版本库边界不清
+  - data*/analysis/visualizations 与检查点/日志混放；.gitignore 规则未系统覆盖所有产物。
+
+- 模块组织扩展性不足
+  - 采集逻辑集中在单文件 `src/crawler.py`；如扩到多站点/Provider，缺少 `src/providers/xxx.py` 命名空间。
+  - 防风控策略缺少抽象接口（如 RotationProvider/BackoffPolicy/CheckpointStore）。
+
+- 测试与样例缺失
+  - 缺少 tests/samples，用于验证“合并去重 + 关键词筛选 + 分析”的轻量回归。
+
+
+## 四层依赖分离与迁移计划（未来规划）
+
+为便于后续将本项目迁移到其他主题或平台，计划逐步实现“四层依赖关系完全分离”，并将各组件归类到正确位置。该计划不影响现有用法，先以文档与目录约定为主，按需渐进实施。
+
+- 第一层：核心能力层（Core Library）
+  - 位置：`src/`、`analysis/`
+  - 职责：纯函数/类，提供采集能力（`HttpClient`/`WbiSigner`/`BiliCrawler`）、持久化（CSV/SQLite/JSON）、统计、文本处理与可视化能力。
+  - 约束：无 CLI/无副作用打印，使用 `logging`；可被任意脚本/项目复用。
+
+- 第二层：编排与策略层（Orchestration）
+  - 位置：`scripts/`
+  - 职责：参数解析、流程编排与“防风控策略”（月份乱序、代理/Cookie/UA 轮换、指数退避、检查点、尝试日志）。
+  - 约束：不下沉具体采集/分析实现；仅调用第一层提供的能力；未来可引入 `src/strategies/` 以类的方式承载韧性策略（不改变现有行为）。
+
+- 第三层：资源与配置层（Resources）
+  - 位置：`resources/`（建议逐步集中），以及根目录下的少量敏感清单
+  - 内容：`keywords.txt`（外部词库）、`uas.txt`、`cookies.txt`、`proxies.txt`、`config.yaml` 等。
+  - 约束：不硬编码于代码中；脚本以参数形式注入，便于跨主题/跨环境复用。
+
+- 第四层：产物层（Artifacts）
+  - 位置：`data*/`、`analysis/visualizations/`、`analysis/resilient_*`
+  - 内容：采集结果（CSV/JSON/SQLite）、分析输出（情感曲线、词云）、检查点与尝试日志。
+  - 约束：全部列入 `.gitignore`，不进入版本库。
+
+依赖方向（自上而下单向）：Orchestration → Core Library；Resources 被 Orchestration 注入；Artifacts 由 Orchestration/Analysis 生成。
+
+### 迁移阶段（不重构函数，渐进落地）
+1. 文档与目录约定（当前阶段）
+   - README 与 docs 描述四层模型；新增 `resources/` 并优先放置 `keywords.txt`/`uas.txt`（命令示例指向该目录）。
+   - `.gitignore` 补充产物目录（data*/analysis/cleaned/analysis/visualizations/analysis/resilient_*）。
+2. 入口统一（可选，低侵入）
+   - 新增 `scripts/dzcli.py` 作为统一入口，将现有脚本注册为子命令（仅封装调用，不改现有脚本）。
+3. 策略下沉为类（按需）
+   - 在 `src/strategies/` 增加 `RotationProvider/CheckpointStore/BackoffPolicy/ResilienceStrategy` 等类；`run_resilient_collect.py` 仅做依赖注入，行为不变。
+4. 后处理抽薄模块（按需）
+   - 若多处需要“合并去重+筛选”，在不改变现有脚本的前提下新增 `src/postprocess/merge.py` 薄包装；脚本继续调用原函数，其他项目可直接 import 使用。
+
+通过以上分层与阶段化迁移，既保证现有流程可用，又为未来扩展到其他主题/站点与更复杂的韧性策略留出演进空间。
