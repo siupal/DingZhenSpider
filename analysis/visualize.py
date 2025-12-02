@@ -40,14 +40,23 @@ def plot_sentiment(ts_csv: str, output_dir: str) -> str:
     if df.empty:
         return ""
     df = df.sort_values("window")
+    x_idx = list(range(len(df)))
+    x_labels = df["window"].tolist()
+
     fig, ax = plt.subplots(figsize=(10,4))
-    ax.plot(df["window"], df["score"], marker="o", label="Weighted score", color="#2196f3")
-    ax.set_xlabel("window")
+    ax.plot(x_idx, df["score"], marker="o", label="Weighted score", color="#2196f3")
+    ax.set_xlabel("Month")
     ax.set_ylabel("weighted sentiment")
     ax.set_title("Sentiment over time")
     ax.grid(True, alpha=0.3)
     ax.legend(loc="best")
-    plt.xticks(rotation=45, ha="right")
+
+    # 稀疏化时间刻度，避免横轴过于密集
+    if x_idx:
+        step = max(1, len(x_idx) // 12)  # 至多约 12 个刻度
+        tick_positions = x_idx[::step]
+        tick_labels = [x_labels[i] for i in tick_positions]
+        plt.xticks(tick_positions, tick_labels, rotation=45, ha="right")
     path = os.path.join(output_dir, "visualizations", "sentiment_timeseries.png")
     os.makedirs(os.path.dirname(path), exist_ok=True)
     fig.tight_layout()
@@ -78,9 +87,9 @@ def plot_sentiment_ratios(ts_csv: str, output_dir: str) -> str:
     if df.empty:
         return ""
     fig, ax = plt.subplots(figsize=(10,5))
-    x = df["window"]
+    x_idx = list(range(len(df)))
     ax.stackplot(
-        x,
+        x_idx,
         df["pos_ratio"],
         df["neu_ratio"],
         df["neg_ratio"],
@@ -94,7 +103,14 @@ def plot_sentiment_ratios(ts_csv: str, output_dir: str) -> str:
     ax.set_title("Monthly Sentiment Composition")
     ax.grid(alpha=0.2, axis="y")
     ax.legend(loc="upper right")
-    plt.xticks(rotation=45, ha="right")
+
+    # 稀疏化时间刻度
+    if x_idx:
+        x_labels = df["window"].tolist()
+        step = max(1, len(x_idx) // 12)
+        tick_positions = x_idx[::step]
+        tick_labels = [x_labels[i] for i in tick_positions]
+        plt.xticks(tick_positions, tick_labels, rotation=45, ha="right")
     path = os.path.join(output_dir, "visualizations", "sentiment_ratios.png")
     os.makedirs(os.path.dirname(path), exist_ok=True)
     fig.tight_layout()
@@ -142,7 +158,12 @@ def plot_sentiment_ratio_and_score(ts_csv: str, output_dir: str) -> str:
     h2, l2 = ax2.get_legend_handles_labels()
     ax1.legend(h1 + h2, l1 + l2, loc="upper left")
 
-    plt.xticks(x_idx, x_labels, rotation=45, ha="right")
+    # 稀疏化时间刻度
+    if x_idx:
+        step = max(1, len(x_idx) // 12)
+        tick_positions = x_idx[::step]
+        tick_labels = [x_labels[i] for i in tick_positions]
+        plt.xticks(tick_positions, tick_labels, rotation=45, ha="right")
     plt.title("Monthly Sentiment Ratios and Score")
 
     path = os.path.join(output_dir, "visualizations", "sentiment_ratio_score.png")
