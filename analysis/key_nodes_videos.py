@@ -29,22 +29,42 @@ def _load_comments(cleaned_csv: str) -> pd.DataFrame:
 
 
 def _load_videos_from_data(data_dir: str) -> pd.DataFrame:
-    if not os.path.isdir(data_dir):
-        return pd.DataFrame()
+    """从本地已爬取的各类 CSV 中汇总视频元数据。
+
+    优先使用本地数据目录（data/、data_click/、data_totalrank/、data_merged/、data_merged_relaxed），
+    通过 bvid 去重后返回一个包含 title/view/reply/like 等字段的总表，
+    以避免依赖联网补全。
+    """
+    base = os.path.abspath(data_dir)
+    candidate_dirs: List[str] = [base]
+    # 若存在其它采集输出目录，也一并纳入
+    for sub in ["data_click", "data_totalrank", "data_merged", "data_merged_relaxed"]:
+        p = os.path.join(os.path.dirname(base), sub)
+        if os.path.isdir(p):
+            candidate_dirs.append(p)
+
     files: List[str] = []
-    files.extend(glob(os.path.join(data_dir, "comments_*.csv")))
+    for d in candidate_dirs:
+        files.extend(glob(os.path.join(d, "comments_*.csv")))
+        # data_merged / data_merged_relaxed 里也可能是按月合并后的 csv
+        files.extend(glob(os.path.join(d, "*.csv")))
+
     if not files:
         return pd.DataFrame()
-    dfs = []
-    for fp in files:
+
+    dfs: List[pd.DataFrame] = []
+    for fp in sorted(set(files)):
         try:
             df = pd.read_csv(fp)
+            # 只保留含 bvid 的表作为候选元数据源
             if "bvid" in df.columns:
                 dfs.append(df)
         except Exception:
             continue
+
     if not dfs:
         return pd.DataFrame()
+
     merged = pd.concat(dfs, ignore_index=True)
     # 按 bvid 去重，保留指标最高的一行（view 优先）
     if "view" in merged.columns:
