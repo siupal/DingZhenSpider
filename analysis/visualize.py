@@ -196,18 +196,70 @@ def wordcloud_from_topics(topics_csv: str, output_dir: str) -> str:
     return ";".join(paths)
 
 
+def plot_weekly_sentiment_with_candidates(weekly_csv: str, candidate_csv: str, output_dir: str) -> str:
+    """基于按周的情绪时序绘图，并高亮候选关键周。"""
+    os.makedirs(output_dir, exist_ok=True)
+    if not os.path.exists(weekly_csv):
+        return ""
+    df = pd.read_csv(weekly_csv)
+    if df.empty:
+        return ""
+    df = df.sort_values("window")
+    x_idx = list(range(len(df)))
+    x_labels = df["window"].tolist()
+
+    cand_idx = set()
+    if os.path.exists(candidate_csv):
+        cdf = pd.read_csv(candidate_csv)
+        if not cdf.empty:
+            cdf = cdf.sort_values("window")
+            cand_windows = set(cdf["window"].astype(str).tolist())
+            for i, w in enumerate(x_labels):
+                if str(w) in cand_windows:
+                    cand_idx.add(i)
+
+    fig, ax = plt.subplots(figsize=(10,4))
+    ax.plot(x_idx, df["score"], marker="o", color="#90caf9", label="Weekly score")
+    if cand_idx:
+        xs = [i for i in x_idx if i in cand_idx]
+        ys = [df["score"].iloc[i] for i in xs]
+        ax.scatter(xs, ys, color="#e53935", s=40, zorder=3, label="Candidate weeks")
+    ax.set_xlabel("Week")
+    ax.set_ylabel("weighted sentiment")
+    ax.set_title("Weekly sentiment with key weeks highlighted")
+    ax.grid(True, alpha=0.3)
+    ax.legend(loc="best")
+
+    if x_idx:
+        step = max(1, len(x_idx) // 12)
+        tick_positions = x_idx[::step]
+        tick_labels = [x_labels[i] for i in tick_positions]
+        plt.xticks(tick_positions, tick_labels, rotation=45, ha="right")
+
+    path = os.path.join(output_dir, "visualizations", "weekly_sentiment_key_weeks.png")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    fig.tight_layout()
+    fig.savefig(path, dpi=150)
+    plt.close(fig)
+    return path
+
+
 def main():
     ts_csv = os.environ.get("DZ_SENT_TS", os.path.join("analysis","sentiment_timeseries.csv"))
     topics_csv = os.environ.get("DZ_TOPICS", os.path.join("analysis","topics_by_window.csv"))
     out_dir = os.environ.get("DZ_ANALYSIS_DIR", os.path.join("analysis"))
+    weekly_csv = os.environ.get("DZ_WEEKLY_TS", os.path.join("analysis","sentiment_timeseries_weekly.csv"))
+    cand_weeks_csv = os.path.join(out_dir, "candidate_weeks.csv")
     a = plot_sentiment(ts_csv, out_dir)
     b = wordcloud_from_topics(topics_csv, out_dir)
     c = plot_sentiment_ratios(ts_csv, out_dir)
     d = plot_sentiment_ratio_and_score(ts_csv, out_dir)
+    e = plot_weekly_sentiment_with_candidates(weekly_csv, cand_weeks_csv, out_dir)
     print(a)
     print(b)
     print(c)
     print(d)
+    print(e)
 
 
 if __name__ == "__main__":
