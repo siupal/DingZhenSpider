@@ -161,14 +161,20 @@
 > 说明：JSON 对齐是基于 CSV 的 `bvid` 列进行子集过滤，确保“当月 JSON 与最终用于分析的 CSV 同步一致”。当启用 `--relaxed_filter` 时，以筛选后的 CSV 为准；否则以合并后的 CSV 为准。
 
 ### 3) 分析层（analysis/）
-- preprocess.py：从评论 JSON/CSV 提取与清洗，输出规范化 CSV（去重、时间标准化等）。
-- sentiment_baseline.py：轻量情感基线（词典 + emoji 规则），按月度聚合情感分数。
-- topics_baseline.py：关键词/话题基线（jieba 分词 + 停用词过滤），按月统计高频词 TopN。
+- preprocess.py：从评论 JSON/CSV 提取与清洗，输出规范化 CSV（去重、时间标准化等），例如 `analysis/cleaned/comments_cleaned.csv`。
+- sentiment_baseline.py：情感分析基线，基于 SnowNLP 连续情感得分 + 词典/emoji 规则，按时间窗口聚合情感分数，支持周粒度输出（例如 `analysis/sentiment_timeseries_weekly.csv`）。
+- topics_baseline.py：关键词/话题基线（jieba 分词 + 停用词过滤），按时间窗口统计高频词 TopN。
 - visualize.py：
-  - 画情感时间序列折线图与月度词云。
+  - 画情感时间序列折线图和占比图，当前推荐基于周粒度情绪数据（`sentiment_timeseries_weekly.csv`），并可高亮候选关键周。
   - 自动探测系统中文字体；WordCloud 指定中文字体防止乱码。
 - closed_comments.py：汇总“评论区关闭/受限”的视频，并可与视频清单关联输出明细/汇总表。
-- scripts/run_analysis.py：一键串联清洗、情感、话题与可视化（可按需选择阶段）。
+- key_nodes_prepare.py：基于按条清洗后的评论（如 `analysis/cleaned/comments_cleaned.csv`），按周聚合评论数量与情绪指标，输出周级时间序列（`analysis/sentiment_timeseries_weekly.csv`）。
+- key_nodes_detect.py：在周级情绪与评论量曲线上进行异常检测（z-score、环比跳变等），自动筛选候选“关键周”，输出 `analysis/candidate_weeks.csv`。
+- key_nodes_videos.py：结合候选关键周、评论数据与多来源视频元数据（`data*/` 与 `data_merged*` 下的 CSV），为每个关键周选出一批“关键视频”，输出 `analysis/key_videos.csv`。
+- backfill_video_meta.py（可选）：对 `key_videos.csv` 中缺失的字段，优先使用本地多源合并结果补全；必要时可调用 B 站公开接口补充视频元数据，输出富集版 `analysis/key_videos_enriched.csv`。
+- weekly_wordclouds.py：针对 `candidate_weeks.csv` 中的每个关键周，从 `comments_cleaned.csv` 中抽取该周评论文本，按周生成话题词云，输出到 `analysis/visualizations/week_wordclouds/`（一周一张 PNG）。
+- key_videos_summary.py：按 `bvid` 对关键视频进行汇总（聚合跨周的曝光与情绪信息），输出 `analysis/key_videos_summary.csv`，用于快速锁定少数真正“核心节点”视频。
+- scripts/run_analysis.py：一键串联清洗、情感、话题与可视化（可按需选择阶段，适合基线分析）。
 
 ### 4) 数据产物与目录
 - data/、data_click/、data_totalrank/、data_merged/：分月度输出评论 CSV/JSON。
@@ -212,6 +218,39 @@ python scripts/run_analysis.py --data_dir data_merged_json --analysis_dir analys
 # 可选：指定中文字体路径（若图表或词云中文字体异常）
 # $env:DZ_FONT = "C:\\Windows\\Fonts\\msyh.ttc"; python analysis/visualize.py
 ```
+
+#### 5.2 情绪与关键节点分析（周粒度）
+在完成采集与合并（`data_merged*` / `data_merged_json`）后，可基于 `analysis/` 目录下脚本完成“周级情绪 → 关键周 → 关键视频 → 话题词云与节点汇总”的分析闭环。下面给出一个典型调用顺序（假设已通过 `preprocess.py` 生成 `analysis/cleaned/comments_cleaned.csv`）：
+```powershell
+# 1) 预处理：将合并后的评论 JSON/CSV 规范化为逐条评论表（若尚未执行）
+python analysis/preprocess.py --input_dir data_merged_json --out_dir analysis/cleaned
+
+# 2) 生成周级情绪与评论量时间序列（sentiment_timeseries_weekly.csv）
+python analysis/key_nodes_prepare.py --input_csv analysis/cleaned/comments_cleaned.csv --output_dir analysis
+
+# 3) 基于周级情绪曲线与评论量自动筛选候选关键周（candidate_weeks.csv）
+python analysis/key_nodes_detect.py --input_csv analysis/sentiment_timeseries_weekly.csv --output_csv analysis/candidate_weeks.csv
+
+# 4) 针对每个关键周，结合评论与本地视频元数据选出关键视频（key_videos.csv）
+python analysis/key_nodes_videos.py --comments_csv analysis/cleaned/comments_cleaned.csv --candidate_weeks_csv analysis/candidate_weeks.csv --output_csv analysis/key_videos.csv
+
+# 5) 可选：对关键视频做在线/本地元数据补全，得到 enriched 版本
+python analysis/backfill_video_meta.py --input_csv analysis/key_videos.csv --output_csv analysis/key_videos_enriched.csv
+
+# 6) 为每个关键周生成话题词云，输出到 analysis/visualizations/week_wordclouds/
+python analysis/weekly_wordclouds.py
+
+# 7) 按 bvid 汇总关键视频，方便挑选少数“核心节点”用于报告撰写
+python analysis/key_videos_summary.py
+```
+
+通过上述流水线，你可以获得：
+
+- **情绪与评论量的周级时间序列**：`analysis/sentiment_timeseries_weekly.csv`，可由 `analysis/visualize.py` 画出折线图并高亮关键周；
+- **候选关键周列表**：`analysis/candidate_weeks.csv`，包含情绪突变或异常活跃的时间窗口；
+- **关键视频明细与富集元数据**：`analysis/key_videos.csv` 与 `analysis/key_videos_enriched.csv`；
+- **按周的话题词云**：`analysis/visualizations/week_wordclouds/*.png`，用于对比关键周情绪走势与话题内容变迁；
+- **按 bvid 聚合的核心节点视频总表**：`analysis/key_videos_summary.csv`，便于在论文/报告中重点分析少量“节点视频”的情绪轨迹与议题演化。
 
 ### 6) 风控与恢复要点
 - 风控信号：
