@@ -8,3 +8,5 @@ cookies.txt
 proxies.txt
 uas.txt
 analysis/visualizations/wordclouds.zip
+
+analysis/visualizations/week_wordclouds/*
