@@ -245,10 +245,11 @@ def plot_weekly_sentiment_with_candidates(weekly_csv: str, candidate_csv: str, o
 
 
 def main():
-    ts_csv = os.environ.get("DZ_SENT_TS", os.path.join("analysis","sentiment_timeseries.csv"))
+    # 统一使用按周聚合的情感时序数据
+    ts_csv = os.environ.get("DZ_WEEKLY_TS", os.path.join("analysis","sentiment_timeseries_weekly.csv"))
     topics_csv = os.environ.get("DZ_TOPICS", os.path.join("analysis","topics_by_window.csv"))
     out_dir = os.environ.get("DZ_ANALYSIS_DIR", os.path.join("analysis"))
-    weekly_csv = os.environ.get("DZ_WEEKLY_TS", os.path.join("analysis","sentiment_timeseries_weekly.csv"))
+    weekly_csv = ts_csv
     cand_weeks_csv = os.path.join(out_dir, "candidate_weeks.csv")
     a = plot_sentiment(ts_csv, out_dir)
     b = wordcloud_from_topics(topics_csv, out_dir)
